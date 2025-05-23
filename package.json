@@ -1,0 +1,16 @@
+{
+  "name": "paper-knowledge-graph",
+  "version": "1.0.0",
+  "description": "论文知识图谱可视化系统",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+} 
