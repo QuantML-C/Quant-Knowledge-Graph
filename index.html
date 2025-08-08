@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>论文知识图谱</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #graph {
+            width: 100%;
+            height: 100%;
+            background-color: #f9f9f9;
+        }
+        .node {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .node:hover circle {
+            stroke: #ff7f0e;
+            stroke-width: 3px;
+        }
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+            transition: all 0.3s ease;
+        }
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+            transition: all 0.3s ease;
+        }
+        #info-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 350px;
+            background-color: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+            max-height: 80vh;
+            overflow-y: auto;
+            display: none;
+            z-index: 1000;
+            transition: all 0.3s ease;
+            border-left: 5px solid #1f77b4;
+        }
+        #info-panel.paper-info {
+            border-left-color: #ff7f0e;
+        }
+        #info-panel.tag-info {
+            border-left-color: #1f77b4;
+        }
+        #info-panel h2 {
+            margin-top: 0;
+            font-size: 20px;
+            color: #333;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        #info-panel p {
+            margin: 12px 0;
+            font-size: 14px;
+            color: #555;
+            line-height: 1.5;
+        }
+        .tag {
+            display: inline-block;
+            background-color: #e0e0e0;
+            padding: 3px 8px;
+            margin: 2px;
+            border-radius: 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .tag:hover {
+            background-color: #1f77b4;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .paper-link {
+            cursor: pointer;
+            color: #1f77b4;
+            display: block;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 5px;
+            background-color: #f5f5f5;
+            transition: all 0.2s ease;
+        }
+        .paper-link:hover {
+            background-color: #e0e0e0;
+            transform: translateX(3px);
+        }
+        #search-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+        #search-input {
+            padding: 10px 15px 10px 40px;
+            width: 250px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            font-size: 14px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%23999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>');
+            background-repeat: no-repeat;
+            background-position: 15px center;
+        }
+        #search-input:focus {
+            outline: none;
+            width: 300px;
+            border-color: #1f77b4;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.15);
+        }
+        #legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            padding: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .control-btn {
+            background-color: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        .control-btn:hover {
+            background-color: rgba(240, 240, 240, 0.9);
+        }
+        .nav-links {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 20px;
+            padding: 8px 15px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+        }
+        .nav-links a {
+            margin: 0 10px;
+            text-decoration: none;
+            color: #333;
+            font-weight: bold;
+        }
+        .nav-links a:hover {
+            color: #1f77b4;
+        }
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #999;
+            transition: all 0.2s ease;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+        .close-btn:hover {
+            color: #555;
+            background-color: #f0f0f0;
+        }
+        .back-to-node {
+            display: inline-block;
+            margin-top: 15px;
+            background-color: #1f77b4;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .back-to-node:hover {
+            background-color: #155d8e;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .highlight-node circle {
+            stroke: #ff7f0e;
+            stroke-width: 3px;
+        }
+        #loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+        .spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #1f77b4;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .tooltip {
+            position: absolute;
+            background-color: white;
+            border-radius: 5px;
+            padding: 8px 12px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1500;
+            max-width: 200px;
+        }
+        .node-label {
+            pointer-events: none;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="loading">
+            <div class="spinner"></div>
+            <p>加载中，请稍候...</p>
+        </div>
+
+        <div class="nav-links">
+            <a href="index.html">论文-标签图谱</a>
+            <a href="tag-graph.html">标签关系图谱</a>
+        </div>
+        
+        <div id="search-container">
+            <input type="text" id="search-input" placeholder="搜索论文或标签...">
+        </div>
+        
+        <div id="graph"></div>
+        
+        <div id="info-panel">
+            <button class="close-btn" title="关闭">&times;</button>
+            <h2 id="paper-title"></h2>
+            <p><strong>作者:</strong> <span id="paper-authors"></span></p>
+            <p><strong>年份:</strong> <span id="paper-year"></span></p>
+            <p><strong>摘要:</strong> <span id="paper-abstract"></span></p>
+            <p><strong>标签:</strong> <div id="paper-tags"></div></p>
+            <button class="back-to-node">返回到节点</button>
+        </div>
+        
+        <div id="legend">
+            <h3 style="margin-top: 0;">图例</h3>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #ff7f0e;"></div>
+                <span>论文</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #1f77b4;"></div>
+                <span>标签</span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" id="zoom-in" title="放大">+</button>
+            <button class="control-btn" id="zoom-out" title="缩小">-</button>
+            <button class="control-btn" id="reset-zoom" title="重置">↺</button>
+        </div>
+        
+        <div class="tooltip" id="node-tooltip"></div>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        // 初始化变量
+        let graph, simulation, svg, g;
+        let nodes = [], links = [];
+        let width, height;
+        let transform = d3.zoomIdentity;
+        let currentNode = null;
+        let tooltip = d3.select("#node-tooltip");
+        
+        // 颜色映射
+        const colorMap = {
+            paper: "#ff7f0e",
+            tag: "#1f77b4"
+        };
+        
+        // 加载数据
+        async function loadData() {
+            try {
+                const response = await fetch('papers.json');
+                const papers = await response.json();
+                
+                // 提取所有唯一的标签
+                const allTags = new Set();
+                papers.forEach(paper => {
+                    if (paper.tags && Array.isArray(paper.tags)) {
+                        paper.tags.forEach(tag => allTags.add(tag));
+                    }
+                });
+                
+                // 创建节点
+                // 首先添加论文节点
+                papers.forEach(paper => {
+                    nodes.push({
+                        id: paper.id,
+                        name: paper.title,
+                        type: 'paper',
+                        data: paper
+                    });
+                });
+                
+                // 然后添加标签节点
+                allTags.forEach(tag => {
+                    nodes.push({
+                        id: `tag-${tag}`,
+                        name: tag,
+                        type: 'tag',
+                        data: { tag }
+                    });
+                });
+                
+                // 创建连接
+                papers.forEach(paper => {
+                    if (paper.tags && Array.isArray(paper.tags)) {
+                        paper.tags.forEach(tag => {
+                            links.push({
+                                source: paper.id,
+                                target: `tag-${tag}`,
+                                value: 1
+                            });
+                        });
+                    }
+                });
+                
+                // 初始化图形
+                initializeGraph();
+                
+                // 隐藏加载动画
+                document.getElementById('loading').style.display = 'none';
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('loading').innerHTML = `
+                    <p style="color: red">加载数据出错</p>
+                    <p>${error.message}</p>
+                    <button onclick="location.reload()" style="padding: 8px 16px; background: #1f77b4; color: white; border: none; border-radius: 4px; cursor: pointer;">重试</button>
+                `;
+            }
+        }
+        
+        // 初始化图形
+        function initializeGraph() {
+            // 设置画布尺寸
+            width = window.innerWidth;
+            height = window.innerHeight;
+            
+            // 创建SVG元素
+            svg = d3.select("#graph")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height)
+                .on("click", handleSvgClick); // 添加点击事件处理
+            
+            // 添加缩放功能
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on("zoom", (event) => {
+                    transform = event.transform;
+                    g.attr("transform", transform);
+                    // 当缩放时隐藏提示
+                    tooltip.style("opacity", 0);
+                });
+            
+            svg.call(zoom);
+            
+            // 创建一个包含所有元素的组
+            g = svg.append("g");
+            
+            // 创建力导向图
+            simulation = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+                .force("charge", d3.forceManyBody().strength(-300))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 2));
+            
+            // 绘制连接线
+            const link = g.append("g")
+                .selectAll("line")
+                .data(links)
+                .enter()
+                .append("line")
+                .attr("class", "link")
+                .attr("stroke-width", d => Math.sqrt(d.value));
+            
+            // 绘制节点
+            const node = g.append("g")
+                .selectAll(".node")
+                .data(nodes)
+                .enter()
+                .append("g")
+                .attr("class", "node")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended))
+                .on("click", handleNodeClick)
+                .on("mouseover", handleNodeMouseOver)
+                .on("mouseout", handleNodeMouseOut);
+            
+            // 添加圆形
+            node.append("circle")
+                .attr("r", getNodeRadius)
+                .attr("fill", d => colorMap[d.type])
+                .attr("stroke", "#fff")
+                .attr("stroke-width", 1.5);
+            
+            // 添加文本标签
+            node.append("text")
+                .attr("class", "node-label")
+                .attr("dy", 3)
+                .attr("text-anchor", "middle")
+                .text(d => getNodeLabel(d))
+                .attr("font-size", "10px")
+                .attr("fill", "#fff");
+            
+            // 设置模拟的tick事件
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+                
+                node
+                    .attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+            
+            // 设置搜索功能
+            setupSearch();
+            
+            // 设置控制按钮
+            setupControls(zoom);
+            
+            // 设置信息面板关闭按钮和返回节点按钮
+            setupInfoPanel();
+        }
+        
+        // 获取节点半径
+        function getNodeRadius(d) {
+            if (d.type === 'paper') {
+                return 8;
+            } else if (d.type === 'tag') {
+                // 计算有多少论文使用了这个标签
+                const count = links.filter(link => link.target.id === d.id).length;
+                return Math.max(5, Math.min(15, 5 + count / 5));
+            }
+            return 5;
+        }
+        
+        // 获取节点标签
+        function getNodeLabel(d) {
+            if (d.type === 'tag') {
+                return d.name.length > 10 ? d.name.substring(0, 10) + '...' : d.name;
+            }
+            return '';
+        }
+        
+        // 处理节点悬停
+        function handleNodeMouseOver(event, d) {
+            // 显示提示
+            tooltip
+                .style("opacity", 1)
+                .html(`<strong>${d.name}</strong>${d.type === 'paper' ? '<br><span style="color:#666; font-size:10px;">点击查看详情</span>' : ''}`)
+                .style("left", (event.pageX + 10) + "px")
+                .style("top", (event.pageY - 28) + "px");
+                
+            // 高亮相关连接
+            d3.selectAll(".link")
+                .style("stroke-opacity", link => 
+                    (link.source.id === d.id || link.target.id === d.id) ? 1 : 0.2);
+                
+            // 放大当前节点
+            d3.select(this).select("circle")
+                .transition()
+                .duration(200)
+                .attr("r", getNodeRadius(d) * 1.2);
+        }
+        
+        // 处理节点鼠标离开
+        function handleNodeMouseOut() {
+            // 隐藏提示
+            tooltip.style("opacity", 0);
+            
+            // 恢复连接透明度
+            d3.selectAll(".link")
+                .style("stroke-opacity", 0.6);
+                
+            // 恢复节点大小
+            d3.select(this).select("circle")
+                .transition()
+                .duration(200)
+                .attr("r", d => getNodeRadius(d));
+        }
+        
+        // 处理节点点击
+        function handleNodeClick(event, d) {
+            // 防止事件冒泡到SVG
+            event.stopPropagation();
+            
+            // 移除之前的高亮
+            d3.selectAll(".node").classed("highlight-node", false);
+            
+            // 高亮当前节点
+            d3.select(this).classed("highlight-node", true);
+            
+            // 显示节点信息
+            showNodeInfo(d);
+            
+            // 保存当前节点引用
+            currentNode = this;
+            
+            // 隐藏提示
+            tooltip.style("opacity", 0);
+        }
+        
+        // 处理SVG点击（空白区域点击）
+        function handleSvgClick(event) {
+            // 检查点击是否发生在空白区域
+            if (event.target.tagName === 'svg' || event.target.id === 'graph') {
+                hideInfoPanel();
+                // 移除高亮
+                d3.selectAll(".node").classed("highlight-node", false);
+                currentNode = null;
+            }
+        }
+        
+        // 显示节点信息
+        function showNodeInfo(d) {
+            const infoPanel = document.getElementById('info-panel');
+            
+            if (d.type === 'paper') {
+                infoPanel.className = 'paper-info';
+                document.getElementById('paper-title').textContent = d.data.title;
+                document.getElementById('paper-authors').textContent = d.data.authors ? d.data.authors.join(', ') : 'Unknown';
+                document.getElementById('paper-year').textContent = d.data.year || 'Unknown';
+                document.getElementById('paper-abstract').textContent = d.data.abstract || 'No abstract available';
+                
+                const tagsContainer = document.getElementById('paper-tags');
+                tagsContainer.innerHTML = '';
+                
+                if (d.data.tags && d.data.tags.length > 0) {
+                    d.data.tags.forEach(tag => {
+                        const tagSpan = document.createElement('span');
+                        tagSpan.className = 'tag';
+                        tagSpan.textContent = tag;
+                        tagSpan.addEventListener('click', () => {
+                            // 查找对应的标签节点
+                            const tagNode = nodes.find(n => n.id === `tag-${tag}`);
+                            if (tagNode) {
+                                // 聚焦到该标签节点
+                                focusOnNode(tagNode);
+                            }
+                        });
+                        tagsContainer.appendChild(tagSpan);
+                    });
+                } else {
+                    tagsContainer.textContent = 'No tags';
+                }
+            } else if (d.type === 'tag') {
+                infoPanel.className = 'tag-info';
+                document.getElementById('paper-title').textContent = `标签: ${d.name}`;
+                
+                // 查找使用此标签的所有论文
+                const relatedPapers = nodes
+                    .filter(node => node.type === 'paper' && 
+                             node.data.tags && 
+                             node.data.tags.includes(d.name))
+                    .map(node => node.data);
+                
+                document.getElementById('paper-authors').textContent = '';
+                document.getElementById('paper-year').textContent = '';
+                document.getElementById('paper-abstract').textContent = `${relatedPapers.length} 篇论文使用此标签`;
+                
+                const tagsContainer = document.getElementById('paper-tags');
+                tagsContainer.innerHTML = '<h3>相关论文:</h3>';
+                
+                relatedPapers.forEach(paper => {
+                    const paperDiv = document.createElement('div');
+                    paperDiv.className = 'paper-link';
+                    paperDiv.textContent = paper.title;
+                    paperDiv.addEventListener('click', () => {
+                        // 查找对应的论文节点
+                        const paperNode = nodes.find(n => n.type === 'paper' && n.id === paper.id);
+                        if (paperNode) {
+                            // 聚焦到该论文节点
+                            focusOnNode(paperNode);
+                        }
+                    });
+                    tagsContainer.appendChild(paperDiv);
+                });
+            }
+            
+            // 显示信息面板并添加动画效果
+            infoPanel.style.display = 'block';
+            infoPanel.style.transform = 'translateX(20px)';
+            infoPanel.style.opacity = '0';
+            setTimeout(() => {
+                infoPanel.style.transform = 'translateX(0)';
+                infoPanel.style.opacity = '1';
+            }, 10);
+        }
+        
+        // 聚焦到指定节点
+        function focusOnNode(node) {
+            // 寻找对应的DOM节点
+            let targetNodeElement = null;
+            d3.selectAll('.node').each(function(d) {
+                if (d.id === node.id) {
+                    targetNodeElement = this;
+                }
+            });
+            
+            if (targetNodeElement) {
+                // 移除所有节点的高亮
+                d3.selectAll(".node").classed("highlight-node", false);
+                
+                // 高亮目标节点
+                d3.select(targetNodeElement).classed("highlight-node", true);
+                
+                // 设置当前节点
+                currentNode = targetNodeElement;
+                
+                // 计算缩放和平移以聚焦到节点
+                const scale = 2; // 缩放级别
+                const x = width / 2 - node.x * scale;
+                const y = height / 2 - node.y * scale;
+                
+                // 应用变换
+                svg.transition()
+                   .duration(750)
+                   .call(d3.zoom().transform, d3.zoomIdentity.translate(x, y).scale(scale));
+                
+                // 显示节点信息
+                showNodeInfo(node);
+            }
+        }
+        
+        // 隐藏信息面板
+        function hideInfoPanel() {
+            document.getElementById('info-panel').style.display = 'none';
+        }
+        
+        // 设置信息面板的关闭按钮和返回节点按钮
+        function setupInfoPanel() {
+            // 关闭按钮
+            document.querySelector('.close-btn').addEventListener('click', () => {
+                hideInfoPanel();
+                // 移除高亮
+                d3.selectAll(".node").classed("highlight-node", false);
+                currentNode = null;
+            });
+            
+            // 返回节点按钮
+            document.querySelector('.back-to-node').addEventListener('click', () => {
+                if (currentNode) {
+                    // 获取节点位置
+                    const nodeData = d3.select(currentNode).datum();
+                    
+                    // 计算缩放和平移以聚焦到节点
+                    const scale = 2; // 缩放级别
+                    const x = width / 2 - nodeData.x * scale;
+                    const y = height / 2 - nodeData.y * scale;
+                    
+                    // 应用变换
+                    svg.transition()
+                       .duration(750)
+                       .call(d3.zoom().transform, d3.zoomIdentity.translate(x, y).scale(scale));
+                       
+                    // 保持高亮显示
+                    d3.selectAll(".node").classed("highlight-node", false);
+                    d3.select(currentNode).classed("highlight-node", true);
+                    
+                    // 隐藏信息面板
+                    hideInfoPanel();
+                }
+            });
+            
+            // 点击空白处关闭信息面板
+            document.getElementById('graph').addEventListener('click', function(event) {
+                // 确保点击的是空白区域，而不是节点
+                if (event.target === this || event.target.tagName === 'svg') {
+                    hideInfoPanel();
+                    // 移除高亮
+                    d3.selectAll(".node").classed("highlight-node", false);
+                    currentNode = null;
+                }
+            });
+        }
+        
+        // 拖拽开始
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+        
+        // 拖拽中
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+        
+        // 拖拽结束
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+        
+        // 设置搜索功能
+        function setupSearch() {
+            const searchInput = document.getElementById('search-input');
+            
+            searchInput.addEventListener('input', function() {
+                const searchTerm = this.value.toLowerCase();
+                
+                if (searchTerm === '') {
+                    // 重置所有节点的样式
+                    d3.selectAll('.node circle')
+                        .attr('r', getNodeRadius)
+                        .attr('fill-opacity', 1)
+                        .attr('stroke-width', 1.5);
+                    
+                    d3.selectAll('.link')
+                        .attr('stroke-opacity', 0.6);
+                    
+                    return;
+                }
+                
+                // 找到匹配的节点
+                const matchingNodes = nodes.filter(node => {
+                    if (node.type === 'paper') {
+                        return node.name.toLowerCase().includes(searchTerm) || 
+                               (node.data.abstract && node.data.abstract.toLowerCase().includes(searchTerm)) ||
+                               (node.data.authors && node.data.authors.some(author => author.toLowerCase().includes(searchTerm)));
+                    } else if (node.type === 'tag') {
+                        return node.name.toLowerCase().includes(searchTerm);
+                    }
+                    return false;
+                });
+                
+                const matchingNodeIds = new Set(matchingNodes.map(n => n.id));
+                
+                // 更新节点样式
+                d3.selectAll('.node')
+                    .each(function(d) {
+                        const isMatching = matchingNodeIds.has(d.id);
+                        d3.select(this).select('circle')
+                            .attr('r', isMatching ? getNodeRadius(d) * 1.5 : getNodeRadius(d))
+                            .attr('fill-opacity', isMatching ? 1 : 0.3)
+                            .attr('stroke-width', isMatching ? 3 : 1.5);
+                    });
+                
+                // 更新连接线样式
+                d3.selectAll('.link')
+                    .attr('stroke-opacity', d => 
+                        matchingNodeIds.has(d.source.id) && matchingNodeIds.has(d.target.id) ? 1 : 0.1);
+            });
+        }
+        
+        // 设置控制按钮
+        function setupControls(zoom) {
+            document.getElementById('zoom-in').addEventListener('click', () => {
+                svg.transition().duration(300).call(
+                    zoom.scaleBy, 1.5
+                );
+            });
+            
+            document.getElementById('zoom-out').addEventListener('click', () => {
+                svg.transition().duration(300).call(
+                    zoom.scaleBy, 0.75
+                );
+            });
+            
+            document.getElementById('reset-zoom').addEventListener('click', () => {
+                svg.transition().duration(300).call(
+                    zoom.transform,
+                    d3.zoomIdentity.translate(width / 2, height / 2)
+                        .scale(1)
+                        .translate(-width / 2, -height / 2)
+                );
+            });
+        }
+        
+        // 窗口大小改变时重新调整图形大小
+        window.addEventListener('resize', () => {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            
+            svg.attr("width", width)
+               .attr("height", height);
+            
+            simulation.force("center", d3.forceCenter(width / 2, height / 2))
+                      .restart();
+        });
+        
+        // 加载数据并初始化图形
+        loadData();
+    </script>
+</body>
+</html> 
