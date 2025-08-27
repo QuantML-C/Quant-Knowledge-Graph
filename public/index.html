@@ -293,7 +293,8 @@
         </div>
         
         <div id="search-container">
-            <input type="text" id="search-input" placeholder="搜索论文或标签...">
+            <input type="text" id="search-input" placeholder="搜索论文或标签..." list="search-suggestions">
+            <datalist id="search-suggestions"></datalist>
         </div>
         
         <div id="graph"></div>
@@ -324,6 +325,8 @@
             <button class="control-btn" id="zoom-in" title="放大">+</button>
             <button class="control-btn" id="zoom-out" title="缩小">-</button>
             <button class="control-btn" id="reset-zoom" title="重置">↺</button>
+            <button class="control-btn" id="fit-view" title="适配全图">⤢</button>
+            <button class="control-btn" id="export-png" title="导出为PNG">⤓</button>
         </div>
         
         <div class="tooltip" id="node-tooltip"></div>
@@ -338,6 +341,7 @@
         let transform = d3.zoomIdentity;
         let currentNode = null;
         let tooltip = d3.select("#node-tooltip");
+        let zoom; // 全局缩放变量，便于其他函数使用
         
         // 颜色映射
         const colorMap = {
@@ -393,8 +397,14 @@
                     }
                 });
                 
+                // 从本地存储恢复布局（如果有）
+                loadLayout();
+                
                 // 初始化图形
                 initializeGraph();
+                
+                // 填充搜索建议
+                populateSearchSuggestions();
                 
                 // 隐藏加载动画
                 document.getElementById('loading').style.display = 'none';
@@ -422,8 +432,8 @@
                 .attr("height", height)
                 .on("click", handleSvgClick); // 添加点击事件处理
             
-            // 添加缩放功能
-            const zoom = d3.zoom()
+            // 添加缩放功能（使用全局zoom变量）
+            zoom = d3.zoom()
                 .scaleExtent([0.1, 4])
                 .on("zoom", (event) => {
                     transform = event.transform;
@@ -504,6 +514,9 @@
             
             // 设置信息面板关闭按钮和返回节点按钮
             setupInfoPanel();
+            
+            // 键盘导航
+            setupKeyboardShortcuts();
         }
         
         // 获取节点半径
@@ -776,14 +789,16 @@
             if (!event.active) simulation.alphaTarget(0);
             d.fx = null;
             d.fy = null;
+            // 保存布局
+            saveLayout();
         }
         
         // 设置搜索功能
         function setupSearch() {
             const searchInput = document.getElementById('search-input');
             
-            searchInput.addEventListener('input', function() {
-                const searchTerm = this.value.toLowerCase();
+            const debouncedSearch = debounce(function handleSearch() {
+                const searchTerm = searchInput.value.toLowerCase();
                 
                 if (searchTerm === '') {
                     // 重置所有节点的样式
@@ -818,14 +833,28 @@
                         const isMatching = matchingNodeIds.has(d.id);
                         d3.select(this).select('circle')
                             .attr('r', isMatching ? getNodeRadius(d) * 1.5 : getNodeRadius(d))
-                            .attr('fill-opacity', isMatching ? 1 : 0.3)
+                            .attr('fill-opacity', isMatching ? 1 : 0.2)
                             .attr('stroke-width', isMatching ? 3 : 1.5);
                     });
                 
-                // 更新连接线样式
+                // 更新连接线样式：高亮与匹配节点相邻的连线
                 d3.selectAll('.link')
                     .attr('stroke-opacity', d => 
-                        matchingNodeIds.has(d.source.id) && matchingNodeIds.has(d.target.id) ? 1 : 0.1);
+                        matchingNodeIds.has(d.source.id) || matchingNodeIds.has(d.target.id) ? 1 : 0.1);
+            }, 150);
+            
+            searchInput.addEventListener('input', debouncedSearch);
+            
+            // 回车键定位到第一个匹配项
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const term = searchInput.value.trim().toLowerCase();
+                    if (!term) return;
+                    const first = nodes.find(n => (n.name && n.name.toLowerCase().includes(term)) || (n.data && n.data.abstract && n.data.abstract.toLowerCase().includes(term)));
+                    if (first) {
+                        focusOnNode(first);
+                    }
+                }
             });
         }
         
@@ -851,6 +880,128 @@
                         .translate(-width / 2, -height / 2)
                 );
             });
+            
+            // 适配全图
+            document.getElementById('fit-view').addEventListener('click', fitToView);
+            
+            // 导出PNG
+            document.getElementById('export-png').addEventListener('click', exportAsPNG);
+        }
+        
+        // 键盘快捷键：方向键平移，+/- 缩放
+        function setupKeyboardShortcuts() {
+            window.addEventListener('keydown', function(e) {
+                if (!svg) return;
+                const panStep = 50;
+                let t = d3.zoomTransform(svg.node());
+                if (e.key === 'ArrowUp') {
+                    t.y += panStep;
+                } else if (e.key === 'ArrowDown') {
+                    t.y -= panStep;
+                } else if (e.key === 'ArrowLeft') {
+                    t.x += panStep;
+                } else if (e.key === 'ArrowRight') {
+                    t.x -= panStep;
+                } else if (e.key === '+') {
+                    svg.call(zoom.scaleBy, 1.2);
+                    return;
+                } else if (e.key === '-') {
+                    svg.call(zoom.scaleBy, 0.8);
+                    return;
+                } else {
+                    return;
+                }
+                svg.call(zoom.transform, t);
+            });
+        }
+        
+        // 填充搜索建议
+        function populateSearchSuggestions() {
+            const dl = document.getElementById('search-suggestions');
+            dl.innerHTML = '';
+            nodes.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n.name;
+                dl.appendChild(opt);
+            });
+        }
+        
+        // 保存布局到localStorage
+        function saveLayout() {
+            try {
+                const positions = {};
+                nodes.forEach(n => {
+                    positions[n.id] = { x: n.x, y: n.y };
+                });
+                localStorage.setItem('qkg_layout_index', JSON.stringify(positions));
+            } catch (e) {}
+        }
+        
+        // 从localStorage加载布局
+        function loadLayout() {
+            try {
+                const raw = localStorage.getItem('qkg_layout_index');
+                if (!raw) return;
+                const positions = JSON.parse(raw);
+                nodes.forEach(n => {
+                    if (positions[n.id]) {
+                        n.x = positions[n.id].x;
+                        n.y = positions[n.id].y;
+                    }
+                });
+            } catch (e) {}
+        }
+        
+        // 适配全图
+        function fitToView() {
+            if (!g) return;
+            const bounds = g.node().getBBox();
+            const fullWidth = width, fullHeight = height;
+            const widthScale = fullWidth / bounds.width;
+            const heightScale = fullHeight / bounds.height;
+            const scale = Math.max(0.1, Math.min(4, 0.9 * Math.min(widthScale, heightScale)));
+            const translateX = fullWidth / 2 - (bounds.x + bounds.width / 2) * scale;
+            const translateY = fullHeight / 2 - (bounds.y + bounds.height / 2) * scale;
+            svg.transition().duration(500)
+                .call(zoom.transform, d3.zoomIdentity.translate(translateX, translateY).scale(scale));
+        }
+        
+        // 导出为PNG
+        function exportAsPNG() {
+            if (!svg) return;
+            const svgNode = svg.node();
+            const serializer = new XMLSerializer();
+            let source = serializer.serializeToString(svgNode);
+            if (!source.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) {
+                source = source.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
+            const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+            const image = new Image();
+            image.onload = function() {
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(image, 0, 0);
+                const a = document.createElement('a');
+                a.download = 'graph.png';
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+            };
+            image.src = url;
+        }
+        
+        // 简单防抖
+        function debounce(fn, wait) {
+            let t;
+            return function() {
+                const args = arguments;
+                clearTimeout(t);
+                t = setTimeout(() => fn.apply(null, args), wait);
+            };
         }
         
         // 窗口大小改变时重新调整图形大小

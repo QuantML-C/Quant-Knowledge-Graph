@@ -267,7 +267,8 @@
         </div>
         
         <div id="search-container">
-            <input type="text" id="search-input" placeholder="搜索标签...">
+            <input type="text" id="search-input" placeholder="搜索标签..." list="tag-suggestions">
+            <datalist id="tag-suggestions"></datalist>
         </div>
         
         <div id="graph"></div>
@@ -286,6 +287,8 @@
             <button class="control-btn" id="zoom-in" title="放大">+</button>
             <button class="control-btn" id="zoom-out" title="缩小">-</button>
             <button class="control-btn" id="reset-zoom" title="重置">↺</button>
+            <button class="control-btn" id="fit-view" title="适配全图">⤢</button>
+            <button class="control-btn" id="export-png" title="导出为PNG">⤓</button>
         </div>
         
         <div class="tooltip" id="node-tooltip"></div>
@@ -301,6 +304,7 @@
         let papers = [];
         let currentNode = null;
         let tooltip = d3.select("#node-tooltip");
+        let zoom; // 全局缩放变量
         
         // 加载数据
         async function loadData() {
@@ -365,6 +369,9 @@
                     });
                 });
                 
+                // 从本地存储恢复布局
+                loadLayout();
+
                 // 初始化图形
                 initializeGraph();
                 
@@ -395,7 +402,7 @@
                 .on("click", handleSvgClick); // 添加点击事件处理
             
             // 添加缩放功能
-            const zoom = d3.zoom()
+            zoom = d3.zoom()
                 .scaleExtent([0.1, 4])
                 .on("zoom", (event) => {
                     transform = event.transform;
@@ -494,6 +501,9 @@
             
             // 设置信息面板关闭按钮和返回节点按钮
             setupInfoPanel();
+            
+            // 键盘快捷键
+            setupKeyboardShortcuts();
         }
         
         // 获取节点半径
@@ -764,75 +774,146 @@
             if (!event.active) simulation.alphaTarget(0);
             d.fx = null;
             d.fy = null;
+            saveLayout();
         }
         
-        // 设置搜索功能
+        // 搜索
         function setupSearch() {
-            const searchInput = document.getElementById('search-input');
-            
-            searchInput.addEventListener('input', function() {
-                const searchTerm = this.value.toLowerCase();
-                
-                if (searchTerm === '') {
-                    // 重置所有节点的样式
+            const input = document.getElementById('search-input');
+            const debounced = debounce(() => {
+                const term = input.value.trim().toLowerCase();
+                if (!term) {
                     d3.selectAll('.node circle')
-                        .attr('r', getNodeRadius)
                         .attr('fill-opacity', 1)
                         .attr('stroke-width', 1.5);
-                    
-                    d3.selectAll('.link')
-                        .attr('stroke-opacity', 0.6);
-                    
+                    d3.selectAll('.link').attr('stroke-opacity', 0.6);
                     return;
                 }
-                
-                // 找到匹配的节点
-                const matchingNodes = nodes.filter(node => 
-                    node.name.toLowerCase().includes(searchTerm)
-                );
-                
-                const matchingNodeIds = new Set(matchingNodes.map(n => n.id));
-                
-                // 更新节点样式
-                d3.selectAll('.node')
-                    .each(function(d) {
-                        const isMatching = matchingNodeIds.has(d.id);
-                        d3.select(this).select('circle')
-                            .attr('r', isMatching ? getNodeRadius(d) * 1.5 : getNodeRadius(d))
-                            .attr('fill-opacity', isMatching ? 1 : 0.3)
-                            .attr('stroke-width', isMatching ? 3 : 1.5);
-                    });
-                
-                // 更新连接线样式
-                d3.selectAll('.link')
-                    .attr('stroke-opacity', d => 
-                        (matchingNodeIds.has(d.source.id) || matchingNodeIds.has(d.source)) && 
-                        (matchingNodeIds.has(d.target.id) || matchingNodeIds.has(d.target)) ? 1 : 0.1);
+                const matches = nodes.filter(n => n.name.toLowerCase().includes(term));
+                const ids = new Set(matches.map(n => n.id));
+                d3.selectAll('.node').each(function(d){
+                    const on = ids.has(d.id);
+                    d3.select(this).select('circle')
+                        .attr('fill-opacity', on ? 1 : 0.2)
+                        .attr('stroke-width', on ? 3 : 1.5);
+                });
+                d3.selectAll('.link').attr('stroke-opacity', d => 
+                    ids.has(d.source.id) || ids.has(d.target.id) ? 1 : 0.1);
+            }, 150);
+            input.addEventListener('input', debounced);
+            input.addEventListener('keydown', function(e){
+                if (e.key === 'Enter') {
+                    const term = input.value.trim().toLowerCase();
+                    if (!term) return;
+                    const first = nodes.find(n => n.name.toLowerCase().includes(term));
+                    if (first) focusOnNode(first);
+                }
+            });
+            // datalist
+            const dl = document.getElementById('tag-suggestions');
+            dl.innerHTML = '';
+            nodes.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n.name;
+                dl.appendChild(opt);
             });
         }
         
-        // 设置控制按钮
+        // 控制按钮
         function setupControls(zoom) {
             document.getElementById('zoom-in').addEventListener('click', () => {
-                svg.transition().duration(300).call(
-                    zoom.scaleBy, 1.5
-                );
+                svg.transition().duration(300).call(zoom.scaleBy, 1.5);
             });
-            
             document.getElementById('zoom-out').addEventListener('click', () => {
-                svg.transition().duration(300).call(
-                    zoom.scaleBy, 0.75
-                );
+                svg.transition().duration(300).call(zoom.scaleBy, 0.75);
             });
-            
             document.getElementById('reset-zoom').addEventListener('click', () => {
                 svg.transition().duration(300).call(
                     zoom.transform,
-                    d3.zoomIdentity.translate(width / 2, height / 2)
-                        .scale(1)
-                        .translate(-width / 2, -height / 2)
+                    d3.zoomIdentity.translate(width / 2, height / 2).scale(1).translate(-width / 2, -height / 2)
                 );
             });
+            document.getElementById('fit-view').addEventListener('click', fitToView);
+            document.getElementById('export-png').addEventListener('click', exportAsPNG);
+        }
+        
+        // 键盘快捷键：方向键平移、+/-缩放
+        function setupKeyboardShortcuts() {
+            window.addEventListener('keydown', function(e) {
+                if (!svg) return;
+                const pan = 50;
+                let t = d3.zoomTransform(svg.node());
+                if (e.key === 'ArrowUp') t.y += pan;
+                else if (e.key === 'ArrowDown') t.y -= pan;
+                else if (e.key === 'ArrowLeft') t.x += pan;
+                else if (e.key === 'ArrowRight') t.x -= pan;
+                else if (e.key === '+') { svg.call(zoom.scaleBy, 1.2); return; }
+                else if (e.key === '-') { svg.call(zoom.scaleBy, 0.8); return; }
+                else return;
+                svg.call(zoom.transform, t);
+            });
+        }
+
+        // 保存/加载布局
+        function saveLayout() {
+            try {
+                const pos = {};
+                nodes.forEach(n => pos[n.id] = { x: n.x, y: n.y });
+                localStorage.setItem('qkg_layout_tags', JSON.stringify(pos));
+            } catch(e) {}
+        }
+        function loadLayout() {
+            try {
+                const raw = localStorage.getItem('qkg_layout_tags');
+                if (!raw) return;
+                const pos = JSON.parse(raw);
+                nodes.forEach(n => { if (pos[n.id]) { n.x = pos[n.id].x; n.y = pos[n.id].y; } });
+            } catch(e) {}
+        }
+
+        // 适配全图
+        function fitToView() {
+            if (!g) return;
+            const bounds = g.node().getBBox();
+            const fullWidth = width, fullHeight = height;
+            const widthScale = fullWidth / bounds.width;
+            const heightScale = fullHeight / bounds.height;
+            const scale = Math.max(0.1, Math.min(4, 0.9 * Math.min(widthScale, heightScale)));
+            const translateX = fullWidth / 2 - (bounds.x + bounds.width / 2) * scale;
+            const translateY = fullHeight / 2 - (bounds.y + bounds.height / 2) * scale;
+            svg.transition().duration(500)
+                .call(zoom.transform, d3.zoomIdentity.translate(translateX, translateY).scale(scale));
+        }
+
+        // 导出为PNG
+        function exportAsPNG() {
+            if (!svg) return;
+            const svgNode = svg.node();
+            const serializer = new XMLSerializer();
+            let source = serializer.serializeToString(svgNode);
+            if (!source.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)) {
+                source = source.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
+            const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+            const image = new Image();
+            image.onload = function() {
+                const canvas = document.createElement('canvas');
+                canvas.width = width; canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(image, 0, 0);
+                const a = document.createElement('a');
+                a.download = 'tag-graph.png';
+                a.href = canvas.toDataURL('image/png');
+                a.click();
+            };
+            image.src = url;
+        }
+
+        function debounce(fn, wait) {
+            let t; return function(){ const args = arguments; clearTimeout(t); t = setTimeout(()=>fn.apply(null,args), wait); };
         }
         
         // 窗口大小改变时重新调整图形大小
