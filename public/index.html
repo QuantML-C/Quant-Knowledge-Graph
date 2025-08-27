@@ -191,6 +191,38 @@
         .nav-links a:hover {
             color: #1f77b4;
         }
+        #filter-panel {
+            position: absolute;
+            top: 70px;
+            left: 20px;
+            background-color: rgba(255,255,255,0.95);
+            border-radius: 8px;
+            padding: 10px 12px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            z-index: 90;
+            font-size: 12px;
+            color: #333;
+        }
+        #filter-panel .row { margin: 6px 0; display: flex; align-items: center; gap: 6px; }
+        #filter-panel input[type="number"] { width: 70px; padding: 3px 6px; border: 1px solid #ddd; border-radius: 4px; }
+        .pin-node {
+            display: inline-block;
+            margin-left: 8px;
+            background-color: #6c757d;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .pin-node:hover { background-color: #5a6268; }
+        body.dark { background-color: #0f1115; color: #e8e8e8; }
+        body.dark #graph { background-color: #0b0d12; }
+        body.dark #info-panel, body.dark .nav-links, body.dark #legend, body.dark #filter-panel { background-color: rgba(28,31,38,0.95); color: #e8e8e8; }
+        body.dark .control-btn { background-color: rgba(28,31,38,0.95); color: #e8e8e8; }
+        body.dark .control-btn:hover { background-color: rgba(45,50,61,0.95); }
+        body.dark .legend-color { box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset; }
         .close-btn {
             position: absolute;
             top: 15px;
@@ -306,7 +338,10 @@
             <p><strong>年份:</strong> <span id="paper-year"></span></p>
             <p><strong>摘要:</strong> <span id="paper-abstract"></span></p>
             <p><strong>标签:</strong> <div id="paper-tags"></div></p>
-            <button class="back-to-node">返回到节点</button>
+            <div>
+                <button class="back-to-node">返回到节点</button>
+                <button class="pin-node" title="锁定/解锁当前节点">锁定/解锁</button>
+            </div>
         </div>
         
         <div id="legend">
@@ -321,12 +356,26 @@
             </div>
         </div>
         
+        <div id="filter-panel">
+            <div class="row">
+                <label><input type="checkbox" id="toggle-papers" checked> 显示论文</label>
+            </div>
+            <div class="row">
+                <label><input type="checkbox" id="toggle-tags" checked> 显示标签</label>
+            </div>
+            <div class="row">
+                年份: <input type="number" id="year-min" value=""/> - <input type="number" id="year-max" value=""/>
+            </div>
+        </div>
+        
         <div class="controls">
             <button class="control-btn" id="zoom-in" title="放大">+</button>
             <button class="control-btn" id="zoom-out" title="缩小">-</button>
             <button class="control-btn" id="reset-zoom" title="重置">↺</button>
             <button class="control-btn" id="fit-view" title="适配全图">⤢</button>
             <button class="control-btn" id="export-png" title="导出为PNG">⤓</button>
+            <button class="control-btn" id="toggle-dark" title="深色模式">🌓</button>
+            <button class="control-btn" id="clear-layout" title="清空保存的布局">⎚</button>
         </div>
         
         <div class="tooltip" id="node-tooltip"></div>
@@ -342,6 +391,7 @@
         let currentNode = null;
         let tooltip = d3.select("#node-tooltip");
         let zoom; // 全局缩放变量，便于其他函数使用
+        let minYear = null, maxYear = null;
         
         // 颜色映射
         const colorMap = {
@@ -396,6 +446,19 @@
                         });
                     }
                 });
+                
+                // 年份范围
+                const years = papers.map(p => typeof p.year === 'number' ? p.year : null).filter(v => v !== null);
+                if (years.length > 0) {
+                    minYear = Math.min(...years);
+                    maxYear = Math.max(...years);
+                } else {
+                    const now = new Date().getFullYear();
+                    minYear = now - 10;
+                    maxYear = now;
+                }
+                document.getElementById('year-min').value = minYear;
+                document.getElementById('year-max').value = maxYear;
                 
                 // 从本地存储恢复布局（如果有）
                 loadLayout();
@@ -517,6 +580,22 @@
             
             // 键盘导航
             setupKeyboardShortcuts();
+            
+            // 主题初始化
+            initializeTheme();
+            
+            // 过滤初始化
+            setupFilters();
+            applyFilters();
+            
+            // 若URL包含hash，尝试聚焦
+            setTimeout(() => {
+                const id = decodeURIComponent((location.hash || '').replace('#',''));
+                if (id) {
+                    const target = nodes.find(n => n.id === id);
+                    if (target) focusOnNode(target);
+                }
+            }, 400);
         }
         
         // 获取节点半径
@@ -682,6 +761,9 @@
                 infoPanel.style.transform = 'translateX(0)';
                 infoPanel.style.opacity = '1';
             }, 10);
+            
+            // 更新URL哈希
+            try { location.hash = encodeURIComponent(d.id); } catch (e) {}
         }
         
         // 聚焦到指定节点
@@ -757,6 +839,18 @@
                     // 隐藏信息面板
                     hideInfoPanel();
                 }
+            });
+            
+            // 锁定/解锁
+            document.querySelector('.pin-node').addEventListener('click', () => {
+                if (!currentNode) return;
+                const data = d3.select(currentNode).datum();
+                if (data.fx == null || data.fy == null) {
+                    data.fx = data.x; data.fy = data.y;
+                } else {
+                    data.fx = null; data.fy = null;
+                }
+                saveLayout();
             });
             
             // 点击空白处关闭信息面板
@@ -886,6 +980,60 @@
             
             // 导出PNG
             document.getElementById('export-png').addEventListener('click', exportAsPNG);
+            
+            // 主题切换
+            document.getElementById('toggle-dark').addEventListener('click', toggleTheme);
+            
+            // 清空布局
+            document.getElementById('clear-layout').addEventListener('click', () => {
+                if (confirm('确定要删除保存的布局并恢复默认吗？')) {
+                    localStorage.removeItem('qkg_layout_index');
+                    location.reload();
+                }
+            });
+        }
+        
+        // 过滤器
+        function setupFilters() {
+            document.getElementById('toggle-papers').addEventListener('change', applyFilters);
+            document.getElementById('toggle-tags').addEventListener('change', applyFilters);
+            document.getElementById('year-min').addEventListener('input', applyFilters);
+            document.getElementById('year-max').addEventListener('input', applyFilters);
+        }
+        function applyFilters() {
+            const showPapers = document.getElementById('toggle-papers').checked;
+            const showTags = document.getElementById('toggle-tags').checked;
+            const ym = parseInt(document.getElementById('year-min').value, 10);
+            const yM = parseInt(document.getElementById('year-max').value, 10);
+            
+            const visibleById = new Map();
+            d3.selectAll('.node').each(function(d){
+                let visible = true;
+                if (d.type === 'paper') {
+                    const y = typeof d.data.year === 'number' ? d.data.year : null;
+                    const yearOk = (y === null) ? true : (y >= ym && y <= yM);
+                    visible = showPapers && yearOk;
+                } else if (d.type === 'tag') {
+                    visible = showTags;
+                }
+                visibleById.set(d.id, visible);
+                d3.select(this).style('display', visible ? null : 'none');
+            });
+            d3.selectAll('.link').style('display', function(d){
+                const vs = visibleById.get(d.source.id) !== false;
+                const vt = visibleById.get(d.target.id) !== false;
+                return (vs && vt) ? null : 'none';
+            });
+        }
+        
+        // 主题
+        function initializeTheme() {
+            const t = localStorage.getItem('qkg_theme') || 'light';
+            if (t === 'dark') document.body.classList.add('dark');
+        }
+        function toggleTheme() {
+            document.body.classList.toggle('dark');
+            localStorage.setItem('qkg_theme', document.body.classList.contains('dark') ? 'dark' : 'light');
         }
         
         // 键盘快捷键：方向键平移，+/- 缩放

@@ -169,6 +169,37 @@
             color: #555;
             background-color: #f0f0f0;
         }
+        .pin-node {
+            display: inline-block;
+            margin-left: 8px;
+            background-color: #6c757d;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .pin-node:hover { background-color: #5a6268; }
+        #filter-panel {
+            position: absolute;
+            top: 70px;
+            left: 20px;
+            background-color: rgba(255,255,255,0.95);
+            border-radius: 8px;
+            padding: 10px 12px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            z-index: 90;
+            font-size: 12px;
+            color: #333;
+        }
+        #filter-panel .row { margin: 6px 0; display: flex; align-items: center; gap: 6px; }
+        #filter-panel input[type="number"] { width: 70px; padding: 3px 6px; border: 1px solid #ddd; border-radius: 4px; }
+        body.dark { background-color: #0f1115; color: #e8e8e8; }
+        body.dark #graph { background-color: #0b0d12; }
+        body.dark #info-panel, body.dark .nav-links, body.dark #filter-panel { background-color: rgba(28,31,38,0.95); color: #e8e8e8; }
+        body.dark .control-btn { background-color: rgba(28,31,38,0.95); color: #e8e8e8; }
+        body.dark .control-btn:hover { background-color: rgba(45,50,61,0.95); }
         .back-to-node {
             display: inline-block;
             margin-top: 15px;
@@ -280,7 +311,10 @@
             <p><strong>相关标签:</strong> <div id="related-tags"></div></p>
             <h3>相关论文:</h3>
             <div id="related-papers"></div>
-            <button class="back-to-node">返回到节点</button>
+            <div>
+                <button class="back-to-node">返回到节点</button>
+                <button class="pin-node">锁定/解锁</button>
+            </div>
         </div>
         
         <div class="controls">
@@ -289,9 +323,16 @@
             <button class="control-btn" id="reset-zoom" title="重置">↺</button>
             <button class="control-btn" id="fit-view" title="适配全图">⤢</button>
             <button class="control-btn" id="export-png" title="导出为PNG">⤓</button>
+            <button class="control-btn" id="toggle-dark" title="深色模式">🌓</button>
+            <button class="control-btn" id="clear-layout" title="清空保存的布局">⎚</button>
         </div>
         
         <div class="tooltip" id="node-tooltip"></div>
+        
+        <div id="filter-panel">
+            <div class="row">最小共现次数: <input type="number" id="min-cooc" value="1" /></div>
+            <div class="row">节点最小度: <input type="number" id="min-degree" value="0" /></div>
+        </div>
     </div>
 
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -504,6 +545,20 @@
             
             // 键盘快捷键
             setupKeyboardShortcuts();
+            
+            // 过滤与主题
+            initializeTheme();
+            setupFilters();
+            applyFilters();
+            
+            // 哈希聚焦
+            setTimeout(() => {
+                const id = decodeURIComponent((location.hash || '').replace('#',''));
+                if (id) {
+                    const target = nodes.find(n => n.id === id);
+                    if (target) focusOnNode(target);
+                }
+            }, 400);
         }
         
         // 获取节点半径
@@ -667,6 +722,7 @@
                 infoPanel.style.transform = 'translateX(0)';
                 infoPanel.style.opacity = '1';
             }, 10);
+            try { location.hash = encodeURIComponent(d.id); } catch (e) {}
         }
         
         // 聚焦到指定节点
@@ -722,26 +778,22 @@
             // 返回节点按钮
             document.querySelector('.back-to-node').addEventListener('click', () => {
                 if (currentNode) {
-                    // 获取节点位置
                     const nodeData = d3.select(currentNode).datum();
-                    
-                    // 计算缩放和平移以聚焦到节点
-                    const scale = 2; // 缩放级别
+                    const scale = 2; 
                     const x = width / 2 - nodeData.x * scale;
                     const y = height / 2 - nodeData.y * scale;
-                    
-                    // 应用变换
-                    svg.transition()
-                       .duration(750)
-                       .call(d3.zoom().transform, d3.zoomIdentity.translate(x, y).scale(scale));
-                       
-                    // 保持高亮显示
-                    d3.selectAll(".node").classed("highlight-node", false);
-                    d3.select(currentNode).classed("highlight-node", true);
-                    
-                    // 隐藏信息面板
+                    svg.transition().duration(750).call(d3.zoom().transform, d3.zoomIdentity.translate(x, y).scale(scale));
+                    d3.selectAll('.node').classed('highlight-node', false);
+                    d3.select(currentNode).classed('highlight-node', true);
                     hideInfoPanel();
                 }
+            });
+            // 锁定/解锁
+            document.querySelector('.pin-node').addEventListener('click', () => {
+                if (!currentNode) return;
+                const data = d3.select(currentNode).datum();
+                if (data.fx == null || data.fy == null) { data.fx = data.x; data.fy = data.y; } else { data.fx = null; data.fy = null; }
+                saveLayout();
             });
             
             // 点击空白处关闭信息面板
@@ -821,20 +873,20 @@
         
         // 控制按钮
         function setupControls(zoom) {
-            document.getElementById('zoom-in').addEventListener('click', () => {
-                svg.transition().duration(300).call(zoom.scaleBy, 1.5);
-            });
-            document.getElementById('zoom-out').addEventListener('click', () => {
-                svg.transition().duration(300).call(zoom.scaleBy, 0.75);
-            });
+            document.getElementById('zoom-in').addEventListener('click', () => { svg.transition().duration(300).call(zoom.scaleBy, 1.5); });
+            document.getElementById('zoom-out').addEventListener('click', () => { svg.transition().duration(300).call(zoom.scaleBy, 0.75); });
             document.getElementById('reset-zoom').addEventListener('click', () => {
-                svg.transition().duration(300).call(
-                    zoom.transform,
-                    d3.zoomIdentity.translate(width / 2, height / 2).scale(1).translate(-width / 2, -height / 2)
-                );
+                svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity.translate(width/2, height/2).scale(1).translate(-width/2, -height/2));
             });
             document.getElementById('fit-view').addEventListener('click', fitToView);
             document.getElementById('export-png').addEventListener('click', exportAsPNG);
+            document.getElementById('toggle-dark').addEventListener('click', toggleTheme);
+            document.getElementById('clear-layout').addEventListener('click', () => {
+                if (confirm('确定要删除保存的布局并恢复默认吗？')) {
+                    localStorage.removeItem('qkg_layout_tags');
+                    location.reload();
+                }
+            });
         }
         
         // 键盘快捷键：方向键平移、+/-缩放
@@ -930,6 +982,25 @@
         
         // 加载数据并初始化图形
         loadData();
+
+        function setupFilters() {
+            document.getElementById('min-cooc').addEventListener('input', applyFilters);
+            document.getElementById('min-degree').addEventListener('input', applyFilters);
+        }
+        function applyFilters() {
+            const minCo = parseInt(document.getElementById('min-cooc').value, 10) || 1;
+            const minDeg = parseInt(document.getElementById('min-degree').value, 10) || 0;
+            // 计算度
+            const degree = new Map();
+            nodes.forEach(n => degree.set(n.id, 0));
+            links.forEach(l => { degree.set(l.source.id, degree.get(l.source.id) + 1); degree.set(l.target.id, degree.get(l.target.id) + 1); });
+            // 过滤连线
+            d3.selectAll('.link').style('display', d => (d.value >= minCo) ? null : 'none');
+            // 过滤节点
+            d3.selectAll('.node').style('display', function(d){ return (degree.get(d.id) >= minDeg) ? null : 'none'; });
+        }
+        function initializeTheme() { const t = localStorage.getItem('qkg_theme') || 'light'; if (t === 'dark') document.body.classList.add('dark'); }
+        function toggleTheme() { document.body.classList.toggle('dark'); localStorage.setItem('qkg_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }
     </script>
 </body>
 </html> 
