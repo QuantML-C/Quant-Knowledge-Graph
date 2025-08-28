@@ -332,6 +332,22 @@
         <div id="filter-panel">
             <div class="row">最小共现次数: <input type="number" id="min-cooc" value="1" /></div>
             <div class="row">节点最小度: <input type="number" id="min-degree" value="0" /></div>
+            <!-- 多标签检索（交集） -->
+            <div class="row" style="display:block; margin-top:6px;">
+                <div style="margin-bottom:6px; font-weight:bold;">多标签检索（交集）</div>
+                <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+                    <input type="text" id="multi-tag-input" list="multi-tag-suggestions" placeholder="输入标签，回车添加" style="flex:1; padding:3px 6px; border:1px solid #ddd; border-radius:4px;"/>
+                    <datalist id="multi-tag-suggestions"></datalist>
+                    <button id="add-tag-btn" class="pin-node" style="margin-left:0;">添加</button>
+                </div>
+                <div id="selected-tags-container" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
+                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                    <button id="find-multi-tag-btn" class="pin-node" style="background-color:#1f77b4;">查找论文</button>
+                    <button id="clear-multi-tag-btn" class="pin-node">清空</button>
+                    <span id="multi-tag-result" style="font-size:12px; color:#666;"></span>
+                </div>
+                <div id="multi-tag-result-list" style="margin-top:6px; max-height:140px; overflow:auto;"></div>
+            </div>
         </div>
     </div>
 
@@ -346,6 +362,9 @@
         let currentNode = null;
         let tooltip = d3.select("#node-tooltip");
         let zoom; // 全局缩放变量
+        
+        let allTagsList = [];
+        let selectedSearchTags = new Set();
         
         // 加载数据
         async function loadData() {
@@ -410,6 +429,9 @@
                     });
                 });
                 
+                // 保存标签列表用于多标签检索
+                allTagsList = Array.from(allTags).sort();
+                
                 // 从本地存储恢复布局
                 loadLayout();
 
@@ -418,6 +440,9 @@
                 
                 // 隐藏加载动画
                 document.getElementById('loading').style.display = 'none';
+                
+                // 初始化多标签检索
+                setupMultiTagSearch();
                 
             } catch (error) {
                 console.error('Error loading data:', error);
@@ -1001,6 +1026,105 @@
         }
         function initializeTheme() { const t = localStorage.getItem('qkg_theme') || 'light'; if (t === 'dark') document.body.classList.add('dark'); }
         function toggleTheme() { document.body.classList.toggle('dark'); localStorage.setItem('qkg_theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }
+        
+        // 多标签检索（交集）
+        function setupMultiTagSearch() {
+            const input = document.getElementById('multi-tag-input');
+            const addBtn = document.getElementById('add-tag-btn');
+            const findBtn = document.getElementById('find-multi-tag-btn');
+            const clearBtn = document.getElementById('clear-multi-tag-btn');
+            const dl = document.getElementById('multi-tag-suggestions');
+            
+            // datalist
+            try {
+                dl.innerHTML = '';
+                allTagsList.forEach(tag => { const opt = document.createElement('option'); opt.value = tag; dl.appendChild(opt); });
+            } catch(e) {}
+            
+            function addTag(tag) {
+                if (!tag) return;
+                if (!allTagsList.includes(tag)) return;
+                selectedSearchTags.add(tag);
+                input.value = '';
+                renderSelectedTags();
+            }
+            addBtn.addEventListener('click', () => addTag((input.value||'').trim()));
+            input.addEventListener('keydown', (e) => { if (e.key === 'Enter') addTag((input.value||'').trim()); });
+            findBtn.addEventListener('click', runMultiTagSearch);
+            clearBtn.addEventListener('click', () => { selectedSearchTags.clear(); renderSelectedTags(); clearMultiTagHighlight(); updateMultiTagResult('', []); });
+            
+            renderSelectedTags();
+        }
+        function renderSelectedTags() {
+            const box = document.getElementById('selected-tags-container');
+            box.innerHTML = '';
+            Array.from(selectedSearchTags).forEach(tag => {
+                const chip = document.createElement('span');
+                chip.className = 'related-tag';
+                chip.textContent = tag + ' ×';
+                chip.style.border = '1px solid #1f77b4';
+                chip.addEventListener('click', () => { selectedSearchTags.delete(tag); renderSelectedTags(); });
+                box.appendChild(chip);
+            });
+        }
+        function runMultiTagSearch() {
+            const terms = Array.from(selectedSearchTags);
+            if (terms.length === 0) { clearMultiTagHighlight(); updateMultiTagResult('', []); return; }
+            // 找到同时包含这些标签的论文
+            const matchedPapers = papers.filter(p => terms.every(t => p.tags && p.tags.includes(t)));
+            updateMultiTagResult(`共 ${matchedPapers.length} 篇`, matchedPapers.slice(0, 100));
+            // 高亮与这些论文相关的标签节点（出现在这些论文中的所有标签）
+            const relatedTagSet = new Set();
+            matchedPapers.forEach(p => (p.tags||[]).forEach(t => relatedTagSet.add(t)));
+            highlightTagsByIds(Array.from(relatedTagSet));
+        }
+        function highlightTagsByIds(tagIds) {
+            const idSet = new Set(tagIds);
+            d3.selectAll('.node').each(function(d){
+                const match = idSet.has(d.id);
+                const circle = d3.select(this).select('circle');
+                circle
+                    .attr('fill-opacity', match ? 1 : 0.15)
+                    .attr('r', match ? getNodeRadius(d) * 1.3 : getNodeRadius(d))
+                    .attr('stroke-width', match ? 3 : 1.5);
+            });
+            d3.selectAll('.link').attr('stroke-opacity', d => (idSet.has(d.source.id) && idSet.has(d.target.id)) ? 0.9 : 0.05);
+        }
+        function clearMultiTagHighlight() {
+            d3.selectAll('.node circle')
+                .attr('fill-opacity', 1)
+                .attr('stroke-width', 1.5)
+                .attr('r', d => getNodeRadius(d));
+            d3.selectAll('.link').attr('stroke-opacity', 0.6);
+        }
+        function updateMultiTagResult(text, matchedPapers) {
+            const label = document.getElementById('multi-tag-result');
+            label.textContent = text || '';
+            const list = document.getElementById('multi-tag-result-list');
+            list.innerHTML = '';
+            (matchedPapers||[]).forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'paper-item';
+                const titleElem = document.createElement('strong');
+                titleElem.textContent = p.title;
+                item.appendChild(titleElem);
+                if (p.authors && p.authors.length) {
+                    const authorsElem = document.createElement('div');
+                    authorsElem.textContent = `作者: ${p.authors.join(', ')}`;
+                    authorsElem.style.fontSize = '12px';
+                    authorsElem.style.marginTop = '5px';
+                    item.appendChild(authorsElem);
+                }
+                if (p.year) {
+                    const yearElem = document.createElement('div');
+                    yearElem.textContent = `年份: ${p.year}`;
+                    yearElem.style.fontSize = '12px';
+                    yearElem.style.marginTop = '3px';
+                    item.appendChild(yearElem);
+                }
+                list.appendChild(item);
+            });
+        }
     </script>
 </body>
 </html> 

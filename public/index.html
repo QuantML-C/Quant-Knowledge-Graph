@@ -366,6 +366,22 @@
             <div class="row">
                 年份: <input type="number" id="year-min" value=""/> - <input type="number" id="year-max" value=""/>
             </div>
+            <!-- 多标签检索（交集） -->
+            <div class="row" style="display:block; margin-top:6px;">
+                <div style="margin-bottom:6px; font-weight:bold;">多标签检索</div>
+                <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+                    <input type="text" id="multi-tag-input" list="multi-tag-suggestions" placeholder="输入标签，回车添加" style="flex:1; padding:3px 6px; border:1px solid #ddd; border-radius:4px;"/>
+                    <datalist id="multi-tag-suggestions"></datalist>
+                    <button id="add-tag-btn" class="pin-node" style="margin-left:0;">添加</button>
+                </div>
+                <div id="selected-tags-container" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
+                <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                    <button id="find-multi-tag-btn" class="pin-node" style="background-color:#1f77b4;">查找</button>
+                    <button id="clear-multi-tag-btn" class="pin-node">清空</button>
+                    <span id="multi-tag-result" style="font-size:12px; color:#666;"></span>
+                </div>
+                <div id="multi-tag-result-list" style="margin-top:6px; max-height:160px; overflow:auto;"></div>
+            </div>
         </div>
         
         <div class="controls">
@@ -392,6 +408,8 @@
         let tooltip = d3.select("#node-tooltip");
         let zoom; // 全局缩放变量，便于其他函数使用
         let minYear = null, maxYear = null;
+        let allTagsList = [];
+        let selectedSearchTags = new Set();
         
         // 颜色映射
         const colorMap = {
@@ -433,6 +451,9 @@
                         data: { tag }
                     });
                 });
+                
+                // 所有标签列表（用于多标签检索建议）
+                allTagsList = Array.from(allTags).sort();
                 
                 // 创建连接
                 papers.forEach(paper => {
@@ -587,6 +608,9 @@
             // 过滤初始化
             setupFilters();
             applyFilters();
+            
+            // 多标签检索初始化
+            setupMultiTagSearch();
             
             // 若URL包含hash，尝试聚焦
             setTimeout(() => {
@@ -1023,6 +1047,107 @@
                 const vs = visibleById.get(d.source.id) !== false;
                 const vt = visibleById.get(d.target.id) !== false;
                 return (vs && vt) ? null : 'none';
+            });
+        }
+        
+        // 多标签检索（交集）
+        function setupMultiTagSearch() {
+            const input = document.getElementById('multi-tag-input');
+            const addBtn = document.getElementById('add-tag-btn');
+            const findBtn = document.getElementById('find-multi-tag-btn');
+            const clearBtn = document.getElementById('clear-multi-tag-btn');
+            const dl = document.getElementById('multi-tag-suggestions');
+            
+            // 填充标签建议
+            try {
+                dl.innerHTML = '';
+                allTagsList.forEach(tag => {
+                    const opt = document.createElement('option');
+                    opt.value = tag;
+                    dl.appendChild(opt);
+                });
+            } catch(e) {}
+            
+            function addTag(tag) {
+                if (!tag) return;
+                if (!allTagsList.includes(tag)) return;
+                selectedSearchTags.add(tag);
+                input.value = '';
+                renderSelectedTags();
+            }
+            
+            addBtn.addEventListener('click', () => addTag((input.value || '').trim()));
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') addTag((input.value || '').trim());
+            });
+            findBtn.addEventListener('click', runMultiTagSearch);
+            clearBtn.addEventListener('click', () => { selectedSearchTags.clear(); renderSelectedTags(); clearMultiTagHighlight(); updateMultiTagResult('', []); });
+            
+            renderSelectedTags();
+        }
+        
+        function renderSelectedTags() {
+            const box = document.getElementById('selected-tags-container');
+            box.innerHTML = '';
+            Array.from(selectedSearchTags).forEach(tag => {
+                const chip = document.createElement('span');
+                chip.className = 'tag';
+                chip.textContent = tag + ' ×';
+                chip.style.backgroundColor = '#d0e7ff';
+                chip.style.border = '1px solid #1f77b4';
+                chip.addEventListener('click', () => { selectedSearchTags.delete(tag); renderSelectedTags(); });
+                box.appendChild(chip);
+            });
+        }
+        
+        function runMultiTagSearch() {
+            const terms = Array.from(selectedSearchTags);
+            if (terms.length === 0) { clearMultiTagHighlight(); updateMultiTagResult('', []); return; }
+            const matchedPapers = nodes.filter(n => n.type === 'paper' && terms.every(t => n.data.tags && n.data.tags.includes(t)));
+            highlightPapersByIds(matchedPapers.map(n => n.id));
+            updateMultiTagResult(`共 ${matchedPapers.length} 篇`, matchedPapers.slice(0, 100));
+        }
+        
+        function highlightPapersByIds(paperIds) {
+            const idSet = new Set(paperIds);
+            d3.selectAll('.node').each(function(d){
+                const isPaper = d.type === 'paper';
+                const match = isPaper && idSet.has(d.id);
+                const circle = d3.select(this).select('circle');
+                if (match) {
+                    circle
+                        .attr('fill-opacity', 1)
+                        .attr('r', getNodeRadius(d) * 1.6)
+                        .attr('stroke-width', 3);
+                } else {
+                    circle
+                        .attr('fill-opacity', 0.15)
+                        .attr('r', getNodeRadius(d))
+                        .attr('stroke-width', 1.5);
+                }
+            });
+            d3.selectAll('.link').attr('stroke-opacity', d => idSet.has(d.source.id) ? 0.9 : 0.05);
+        }
+        
+        function clearMultiTagHighlight() {
+            d3.selectAll('.node circle')
+                .attr('fill-opacity', 1)
+                .attr('stroke-width', 1.5)
+                .attr('r', d => getNodeRadius(d));
+            d3.selectAll('.link').attr('stroke-opacity', 0.6);
+        }
+        
+        function updateMultiTagResult(text, matchedNodes) {
+            const label = document.getElementById('multi-tag-result');
+            label.textContent = text || '';
+            const list = document.getElementById('multi-tag-result-list');
+            list.innerHTML = '';
+            (matchedNodes || []).forEach(n => {
+                const item = document.createElement('div');
+                item.className = 'paper-link';
+                item.textContent = n.data.title;
+                item.addEventListener('click', () => focusOnNode(n));
+                list.appendChild(item);
             });
         }
         
